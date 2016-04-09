@@ -37,13 +37,13 @@ add_executable (${PROJECT_NAME} src/main.cc)
 target_link_libraries (${PROJECT_NAME} ${EXTRA_LIBS} ${LIBS})
 
 # Compile flags
-SET (CMAKE_C_FLAGS                "-Wall -std=c11 -Wextra -Werror")
+SET (CMAKE_C_FLAGS                "-Wall -std=c11 -Wextra")
 SET (CMAKE_C_FLAGS_DEBUG          "${CMAKE_CFLAGS} -g")
 SET (CMAKE_C_FLAGS_MINSIZEREL     "${CMAKE_CFLAGS} -Os -DNDEBUG")
 SET (CMAKE_C_FLAGS_RELEASE        "${CMAKE_CFLAGS} -O3 -DNDEBUG")
 SET (CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_CFLAGS} -O2 -g")
 
-SET (CMAKE_CXX_FLAGS                "-Wall -std=c++14 -Wextra -Werror")
+SET (CMAKE_CXX_FLAGS                "-Wall -std=c++14 -Wextra")
 SET (CMAKE_CXX_FLAGS_DEBUG          "${CMAKE_CXXFLAGS} -g")
 SET (CMAKE_CXX_FLAGS_MINSIZEREL     "${CMAKE_CXXFLAGS} -Os -DNDEBUG")
 SET (CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXXFLAGS} -O2 -g")
