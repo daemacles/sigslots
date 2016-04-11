@@ -7,72 +7,95 @@
 template <typename... Args>
 class Wrapper {
 public:
-  static constexpr size_t STORAGE = 3*sizeof(void*);
+  template <typename Cls> using MemberFuncT      = void (Cls::*)(Args...);
+  template <typename Cls> using ConstMemberFuncT = void (Cls::*)(Args...) const;
+                          using FuncT            = void      (*)(Args...);
 
-  template <typename Cls>
-  using MemberFuncT = void (Cls::*)(Args...);
-  using FuncT = void(*)(Args...);
-
+  /// Plop is a class to essentially bind a member function to an instance so
+  /// it can be treated as a regular function call.
   template <typename Obj, typename Func>
   struct Plop {
-
-    using FuncT = Func;
-
-    Plop (Obj &_obj, FuncT _func) :
-        obj(_obj),
-        func(_func)
-    {}
+    Plop (Obj &_obj, Func _func) : obj(_obj), func(_func) {}
 
     void Call (Args... args) {
       (obj.*func)(args...);
     }
 
     Obj &obj;
-    FuncT func;
+    Func func;
   };
 
-  explicit Wrapper(FuncT func) :
-      fn_data_((void*)func),
+  // Figure out how many bytes are required to hold pointers for an object
+  // and a member function.
+  struct Empty {};
+  static constexpr size_t STORAGE = sizeof(Plop<Empty, MemberFuncT<Empty>>);
+
+  /// Constructor for a plain old function.
+  Wrapper(FuncT func) :
+      fn_data_(func),
       caller_(&Wrapper::Caller)
   {}
 
+  /// Constructor for an object and member function.
   template <typename Obj, typename Cls,
             typename PlopT=Plop<Obj, MemberFuncT<Cls>>>
   Wrapper(Obj &obj, MemberFuncT<Cls> func) :
-    caller_(&Wrapper::MemberCaller<PlopT>)
+      fn_data_(obj, func),
+      caller_(&Wrapper::MemberCaller<PlopT>)
   {
     static_assert(sizeof(PlopT) <= STORAGE, "PlopT too large");
 
     // Placement new to construct necessary references
-    new(fn_data_.plop_storage_) PlopT(obj, func);
+    //new(fn_data_.plop_storage_) PlopT(obj, func);
   }
 
-  void Caller (Args... args) {
-    auto func = reinterpret_cast<FuncT>(fn_data_.func_);
-    func(args...);
+  /// Constructor for an object and const member function.
+  template <typename Obj, typename Cls,
+            typename PlopT=Plop<Obj, ConstMemberFuncT<Cls>>>
+  Wrapper(Obj &obj, ConstMemberFuncT<Cls> func) :
+      fn_data_(obj, func),
+      caller_(&Wrapper::MemberCaller<PlopT>)
+  {
+    static_assert(sizeof(PlopT) <= STORAGE, "PlopT too large");
+
+    // Placement new to construct necessary references
+    //new(fn_data_.plop_storage_) PlopT(obj, func);
   }
 
-  template <typename Plop>
-  void MemberCaller (Args... args) {
-    auto plop = reinterpret_cast<Plop*>(fn_data_.plop_storage_);
-    plop->Call(args...);
-  }
-
+  /// Call operator that will forward the args on to the appropriate function
+  /// depending on whether we're wrapping a free function or a member
+  /// function.
   void operator() (Args... args) {
-    (this->*caller_)(args...);
+    caller_(fn_data_, args...);
   }
 
 private:
   union FnData {
-    void *func_;
+    FuncT func_;
     uint8_t plop_storage_[STORAGE];
-    FnData (void *f) : func_(f) {}
-    FnData () {}
-  };
 
-  FnData fn_data_;
+    /// Constructor that just stores a pointer to a function.
+    FnData (FuncT f) : func_(f) {}
 
-  void (Wrapper::*caller_)(Args...);
+    /// Constructor that uses placement new to create the appropriate
+    /// contents.
+    template <typename Obj, typename Func>
+    FnData (Obj &obj, Func func) {
+      new(plop_storage_) Plop<Obj, Func>(obj, func);
+    }
+  } fn_data_;
+
+  void (*caller_)(FnData &, Args...);
+
+  static void Caller (FnData &fn_data, Args... args) {
+    fn_data.func_(args...);
+  }
+
+  template <typename Plop>
+  static void MemberCaller (FnData &fn_data, Args... args) {
+    auto plop = reinterpret_cast<Plop*>(fn_data.plop_storage_);
+    plop->Call(args...);
+  }
 };
 
 
@@ -94,7 +117,14 @@ public:
   }
 
   template <typename Obj, typename Cls>
-  HandleT Connect(Obj &obj, typename WrapperT::template MemberFuncT<Cls> func) {
+  HandleT Connect(Obj &obj,
+                  typename WrapperT::template MemberFuncT<Cls> func) {
+    return Connect(WrapperT(obj, func));
+  }
+
+  template <typename Obj, typename Cls>
+  HandleT Connect(Obj &obj,
+                  typename WrapperT::template ConstMemberFuncT<Cls> func) {
     return Connect(WrapperT(obj, func));
   }
 
@@ -102,6 +132,10 @@ public:
     for (auto& slot_pair : slots_) {
       slot_pair.second(args...);
     }
+  }
+
+  void operator() (Args... args) {
+    Emit(args...);
   }
 
   bool Disconnect (HandleT handle) {
@@ -155,6 +189,33 @@ public:
   }
 };
 
+class Button {
+public:
+  Signal<> clicked;
+
+  void ClickMe (void) {
+    clicked.Emit();
+  }
+};
+
+class Message {
+public:
+  virtual void ShowMessage (void) const {
+    std::cout << "You have clicked the button\n";
+  }
+};
+
+class MessageDerived : public Message {
+public:
+  void ShowMessage (void) const override {
+    std::cout << "You have clicked the button (derived)\n";
+  }
+
+  static void StaticMessaage (void) {
+    std::cout << "Call from static method\n";
+  }
+};
+
 int main(int argc, char **argv) {
   // DELETE THESE.  Used to suppress unused variable warnings.
   (void)argc;
@@ -185,6 +246,14 @@ int main(int argc, char **argv) {
   signal1.Emit(20);
   signal1.Disconnect(handle1);
   signal1.Emit(30);
+
+  Button button;
+  Message message;
+  MessageDerived message2;
+  button.clicked.Connect(message, &Message::ShowMessage);
+  button.clicked.Connect(message2, &Message::ShowMessage);
+  button.clicked.Connect(&MessageDerived::StaticMessaage);
+  button.ClickMe();
 
   return 0;
 }
